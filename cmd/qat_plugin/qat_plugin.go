@@ -210,8 +210,8 @@ func isValidVfDeviceID(vfDevID string) bool {
 
 func (dp *devicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error {
 	tempMap := make(map[string]string)
-	counter := 0
 	for _, cresp := range response.ContainerResponses {
+		counter := 0
 		for k := range cresp.Envs {
 			tempMap[strings.Join([]string{"QAT", strconv.Itoa(counter)}, "")] = cresp.Envs[k]
 			counter++
@@ -225,6 +225,9 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 	devTree := deviceplugin.NewDeviceTree()
 
 	for _, driver := range append(dp.kernelVfDrivers, dp.dpdkDriver) {
+        fmt.Println("dp.kernelVfDrivers:", dp.kernelVfDrivers)
+        fmt.Println("dp.dpdkDriver:", dp.dpdkDriver)
+        fmt.Println("driver:", driver)
 		files, err := ioutil.ReadDir(path.Join(dp.pciDriverDir, driver))
 		if err != nil {
 			fmt.Printf("Can't read sysfs for driver as Driver %s is not available: Skipping\n", driver)
@@ -233,6 +236,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 
 		n := 0
 		for _, file := range files {
+            fmt.Println("file:", file)
 			if !strings.HasPrefix(file.Name(), "0000:") {
 				continue
 			}
@@ -240,6 +244,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			if err != nil {
 				return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", file.Name())
 			}
+            fmt.Println("vfdevID:", vfdevID)
 			if !isValidVfDeviceID(vfdevID) {
 				continue
 			}
@@ -250,6 +255,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			}
 
 			vfpciaddr := strings.TrimPrefix(file.Name(), "0000:")
+            fmt.Println("vfpciaddr:", vfpciaddr)
 
 			// initialize newly found devices which aren't bound to DPDK driver yet
 			if driver != dp.dpdkDriver {
@@ -263,12 +269,14 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			if err != nil {
 				return nil, err
 			}
+            fmt.Println("devNodes:", devNodes)
 			devMounts, err := dp.getDpdkMountPaths(vfpciaddr)
 			if err != nil {
 				return nil, err
 			}
+            fmt.Println("devMounts:", devMounts)
 			deviceName := strings.TrimSuffix(namespace, ".intel.com")
-
+            fmt.Println("deviceName:", deviceName)
 			devinfo := deviceplugin.DeviceInfo{
 				State:  pluginapi.Healthy,
 				Nodes:  devNodes,
