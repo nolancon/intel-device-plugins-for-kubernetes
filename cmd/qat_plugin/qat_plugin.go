@@ -193,7 +193,13 @@ func isValidKerneDriver(kernelvfDriver string) bool {
 	}
 	return false
 }
-
+func isValidDiscoveryFlag(discovery string) bool {
+	switch discovery {
+	case "generic", "per-pf", "per-device":
+		return true
+	}
+	return false
+}
 func isValidDpdkDeviceDriver(dpdkDriver string) bool {
 	switch dpdkDriver {
 	case "igb_uio", "vfio-pci":
@@ -374,6 +380,11 @@ func main() {
 
 	if !isValidDpdkDeviceDriver(*dpdkDriver) {
 		fmt.Println("Wrong DPDK device driver:", *dpdkDriver)
+		os.Exit(1)
+	}
+	
+	if !isValidDiscoveryFlag(*discovery) {
+		fmt.Println("Invalid discovery flag:", *discovery)
 		os.Exit(1)
 	}
 
