@@ -371,7 +371,7 @@ func main() {
 	kernelVfDrivers := flag.String("kernel-vf-drivers", "dh895xccvf,c6xxvf,c3xxxvf,d15xxvf", "Comma separated VF Device Driver of the QuickAssist Devices in the system. Devices supported: DH895xCC,C62x,C3xxx and D15xx")
 	maxNumDevices := flag.Int("max-num-devices", 32, "maximum number of QAT devices to be provided to the QuickAssist device plugin")
 	debugEnabled := flag.Bool("debug", false, "enable debug output")
-	discovery := flag.String("discovery", "generic,per-pf,per-device", "generic or per-pf or per-device")
+	discovery := flag.String("discovery", "generic", "generic or per-pf or per-device")
 	flag.Parse()
 	fmt.Println("QAT device plugin started")
 	if *debugEnabled {
@@ -383,13 +383,10 @@ func main() {
 		os.Exit(1)
 	}
 	
-	discoveryFlags := strings.Split(*discovery, ",")
-	for _, discovery := range discoveryFlags {
-		if !isValidDiscoveryFlag(discovery) {
-			fmt.Println("Invalid discovery flag:", discovery)
-			os.Exit(1)
-		}	
-	}
+	if !isValidDiscoveryFlag(*discovery) {
+		fmt.Printf("Invalid discovery flag: %v Discovery set to default: generic\n",*discovery)
+		*discovery = "generic"
+	}	
 
 	kernelDrivers := strings.Split(*kernelVfDrivers, ",")
 	for _, driver := range kernelDrivers {
