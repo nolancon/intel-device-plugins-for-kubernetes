@@ -195,7 +195,7 @@ func isValidKerneDriver(kernelvfDriver string) bool {
 }
 func isValidDiscoveryFlag(discovery string) bool {
 	switch discovery {
-	case "generic", "per-pf", "per-device":
+	case "generic", "per-pf", "per-device", "":
 		return true
 	}
 	return false
@@ -384,9 +384,13 @@ func main() {
 	}
 	
 	if !isValidDiscoveryFlag(*discovery) {
-		fmt.Printf("Invalid discovery flag: %v Discovery set to default: generic\n",*discovery)
+		fmt.Println("Invalid discovery flag:", *discovery)
+		os.Exit(1)
+	}
+	if *discovery == "" {	
 		*discovery = "generic"
-	}	
+		fmt.Println("Discovery flag not set: Default to generic")	
+	}
 
 	kernelDrivers := strings.Split(*kernelVfDrivers, ",")
 	for _, driver := range kernelDrivers {
