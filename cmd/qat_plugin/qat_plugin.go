@@ -248,7 +248,7 @@ func (dp *devicePlugin)getBoundDevices() []string{
 	var boundVfs []string
 	files, err := ioutil.ReadDir(path.Join(dp.pciDriverDir, dp.dpdkDriver))
 	if err != nil {
-		fmt.Printf("Can't read sysfs for driver as Driver %s is not available: Skipping\n")
+		fmt.Printf("Can't read sysfs for driver as Driver %s is not available: Skipping\n", dp.dpdkDriver)
 	}
 	for _, file := range files {
 		if !strings.HasPrefix(file.Name(), "0000:") {
