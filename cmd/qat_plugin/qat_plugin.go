@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+    "sort"
 	"strings"
 	"strconv"
 	"time"
@@ -51,6 +52,7 @@ const (
 
 type devicePlugin struct {
 	maxDevices      int
+    balanceDevices  bool
 	pciDriverDir    string
 	pciDeviceDir    string
 	kernelVfDrivers []string
@@ -58,9 +60,11 @@ type devicePlugin struct {
 	discovery       string
 }
 
-func newDevicePlugin(pciDriverDir, pciDeviceDir string, maxDevices int, kernelVfDrivers []string, dpdkDriver string, discovery string) *devicePlugin {
+func newDevicePlugin(pciDriverDir, pciDeviceDir string, maxDevices int,
+balanceDevices bool, kernelVfDrivers []string, dpdkDriver string, discovery string) *devicePlugin {
 	return &devicePlugin{
 		maxDevices:      maxDevices,
+        balanceDevices:  balanceDevices,
 		pciDriverDir:    pciDriverDir,
 		pciDeviceDir:    pciDeviceDir,
 		kernelVfDrivers: kernelVfDrivers,
@@ -215,6 +219,25 @@ func isValidVfDeviceID(vfDevID string) bool {
 	return false
 }
 
+func swapBDF(devstrings []string) []string {
+	result := make([]string, len(devstrings))
+	for n, dev := range devstrings {
+		tmp := strings.Split(dev, ":")
+		result[n] = fmt.Sprintf("%v:%v:%v", tmp[2], tmp[1], tmp[0])
+	}
+	return result
+}
+
+func sortByFunction(bdf []string) []string {
+    fmt.Println("Sorting for non per-pf")
+    // make it "FDB" and string sort
+	tmp := swapBDF(bdf)
+	sort.Strings(tmp)
+
+	// return "BDF"
+	return swapBDF(tmp)
+}
+
 func (dp *devicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error {
 	tempMap := make(map[string]string)
 	for _, cresp := range response.ContainerResponses {
@@ -275,6 +298,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			fmt.Printf("Can't read sysfs for driver as Driver %s is not available: Skipping\n", driver)
 			continue
 		}
+        var devices []string
 		n := 0
 		count :=0
 		pfPerDevice := 1
@@ -288,15 +312,23 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			if !strings.HasPrefix(file.Name(), "0000:") {
 				continue
 			}
+            devices = append(devices, file.Name())
+        }
+        fmt.Println("bal devs:", dp.balanceDevices)
+        fmt.Println("disc:", dp.discovery)
+        if dp.balanceDevices && dp.discovery!="per-pf"{
+            devices = sortByFunction(devices)
+        }
 
-			pfdevID, err := dp.getDeviceID(file.Name())
+        for _, dev := range devices {
+			pfdevID, err := dp.getDeviceID(dev)
 			if err != nil {
-				return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", file.Name())
+				return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", dev)
 			}
 			if !isValidPfDeviceID(pfdevID) {
 				continue
 			}
-			pfPciPath := path.Join(dp.pciDeviceDir, file.Name())
+			pfPciPath := path.Join(dp.pciDeviceDir, dev)
 			pfFiles, err := ioutil.ReadDir(pfPciPath)
 			if err != nil {
 				return nil, err
@@ -318,7 +350,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 
 				vfdevID, err := dp.getDeviceID(vfpciadd)
 				if err != nil {
-					return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", file.Name())
+					return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", dev )
 				}
 				if !isValidVfDeviceID(vfdevID) {
 					continue
@@ -354,7 +386,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 					},
 				}
 				if count==0 && dp.discovery!="generic" {
-					pfId = strings.TrimPrefix(strings.TrimSuffix(file.Name(), ":00.0"), "0000:")
+					pfId = strings.TrimPrefix(strings.TrimSuffix(dev, ":00.0"), "0000:")
 				}
 				devTree.AddDevice(pfId, vfpciaddr, devinfo)
 			}
@@ -369,7 +401,8 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 func main() {
 	dpdkDriver := flag.String("dpdk-driver", "vfio-pci", "DPDK Device driver for configuring the QAT device")
 	kernelVfDrivers := flag.String("kernel-vf-drivers", "dh895xccvf,c6xxvf,c3xxxvf,d15xxvf", "Comma separated VF Device Driver of the QuickAssist Devices in the system. Devices supported: DH895xCC,C62x,C3xxx and D15xx")
-	maxNumDevices := flag.Int("max-num-devices", 32, "maximum number of QAT devices to be provided to the QuickAssist device plugin")
+	balanceDevices := flag.Bool("balance-devices", false, "allocate VF devices balanced from each PF")
+    maxNumDevices := flag.Int("max-num-devices", 32, "maximum number of QAT devices to be provided to the QuickAssist device plugin")
 	debugEnabled := flag.Bool("debug", false, "enable debug output")
 	discovery := flag.String("discovery", "generic", "generic or per-pf or per-device")
 	flag.Parse()
@@ -396,7 +429,7 @@ func main() {
 		}
 	}
 
-	plugin := newDevicePlugin(pciDriverDirectory, pciDeviceDirectory, *maxNumDevices, kernelDrivers, *dpdkDriver, *discovery)
+	plugin := newDevicePlugin(pciDriverDirectory, pciDeviceDirectory, *maxNumDevices, *balanceDevices, kernelDrivers, *dpdkDriver, *discovery)
 	manager := deviceplugin.NewManager(namespace, plugin)
 	manager.Run()
 }
