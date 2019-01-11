@@ -42,8 +42,13 @@ spec:
              configMapKeyRef:
               name: intel-qat-plugin-config
               key: DISCOVERY
+        - name: BALANCE_DEVICES
+          valueFrom:
+             configMapKeyRef:
+              name: intel-qat-plugin-config
+              key: BALANCE_DEVICES       
         imagePullPolicy: IfNotPresent
-        command: ["/usr/bin/intel_qat_device_plugin", "-dpdk-driver", "$(DPDK_DRIVER)", "-kernel-vf-drivers", "$(KERNEL_VF_DRIVERS)", "-max-num-devices", "$(MAX_NUM_DEVICES)", "-discovery", "$(DISCOVERY)", "-debug", "$(DEBUG)",]
+        command: ["/usr/bin/intel_qat_device_plugin", "-dpdk-driver", "$(DPDK_DRIVER)", "-kernel-vf-drivers", "$(KERNEL_VF_DRIVERS)", "-max-num-devices", "$(MAX_NUM_DEVICES)", "-discovery", "$(DISCOVERY)", "-balance-devices", "$(BALANCE_DEVICES)", "-debug", "$(DEBUG)",]
         volumeMounts:
         - name: pcidir
           mountPath: /sys/bus/pci

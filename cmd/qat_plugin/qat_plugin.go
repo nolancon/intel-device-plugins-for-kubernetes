@@ -52,7 +52,7 @@ const (
 
 type devicePlugin struct {
 	maxDevices      int
-    balanceDevices  bool
+    	balanceDevices  bool
 	pciDriverDir    string
 	pciDeviceDir    string
 	kernelVfDrivers []string
@@ -64,7 +64,7 @@ func newDevicePlugin(pciDriverDir, pciDeviceDir string, maxDevices int,
 balanceDevices bool, kernelVfDrivers []string, dpdkDriver string, discovery string) *devicePlugin {
 	return &devicePlugin{
 		maxDevices:      maxDevices,
-        balanceDevices:  balanceDevices,
+        	balanceDevices:  balanceDevices,
 		pciDriverDir:    pciDriverDir,
 		pciDeviceDir:    pciDeviceDir,
 		kernelVfDrivers: kernelVfDrivers,
@@ -312,15 +312,15 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 			if !strings.HasPrefix(file.Name(), "0000:") {
 				continue
 			}
-            devices = append(devices, file.Name())
-        }
-        fmt.Println("bal devs:", dp.balanceDevices)
-        fmt.Println("disc:", dp.discovery)
-        if dp.balanceDevices && dp.discovery!="per-pf"{
-            devices = sortByFunction(devices)
-        }
+            		devices = append(devices, file.Name())
+        	}
+        	fmt.Println("bal devs:", dp.balanceDevices)
+        	fmt.Println("disc:", dp.discovery)
+        	if dp.balanceDevices && dp.discovery=="generic"{
+            		devices = sortByFunction(devices)
+        	}
 
-        for _, dev := range devices {
+        	for _, dev := range devices {
 			pfdevID, err := dp.getDeviceID(dev)
 			if err != nil {
 				return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", dev)

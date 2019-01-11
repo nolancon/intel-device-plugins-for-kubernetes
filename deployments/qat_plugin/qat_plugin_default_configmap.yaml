@@ -6,5 +6,6 @@ data:
   DPDK_DRIVER: "vfio-pci"
   KERNEL_VF_DRIVERS: "dh895xccvf,c6xxvf,c3xxxvf,d15xxvf"
   MAX_NUM_DEVICES: "32"
-  DISCOVERY: "generic"
+  DISCOVERY: "per-device"
+  BALANCE_DEVICES: "false"
   DEBUG: "false"
