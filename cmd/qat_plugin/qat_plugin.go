@@ -55,15 +55,17 @@ type devicePlugin struct {
 	pciDeviceDir    string
 	kernelVfDrivers []string
 	dpdkDriver      string
+	driverFilter	map[string]bool
 }
 
-func newDevicePlugin(pciDriverDir, pciDeviceDir string, maxDevices int, kernelVfDrivers []string, dpdkDriver string) *devicePlugin {
+func newDevicePlugin(pciDriverDir, pciDeviceDir string, maxDevices int, kernelVfDrivers []string, dpdkDriver string, driverFilter map[string]bool) *devicePlugin {
 	return &devicePlugin{
 		maxDevices:      maxDevices,
 		pciDriverDir:    pciDriverDir,
 		pciDeviceDir:    pciDeviceDir,
 		kernelVfDrivers: kernelVfDrivers,
 		dpdkDriver:      dpdkDriver,
+		driverFilter:	 driverFilter,
 	}
 }
 
@@ -223,19 +225,29 @@ func (dp *devicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error
 
 func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 	devTree := deviceplugin.NewDeviceTree()
-
 	for _, driver := range append(dp.kernelVfDrivers, dp.dpdkDriver) {
+		if dp.driverFilter[driver] == false {
+			continue
+		}
 		files, err := ioutil.ReadDir(path.Join(dp.pciDriverDir, driver))
 		if err != nil {
 			fmt.Printf("Can't read sysfs for driver as Driver %s is not available: Skipping\n", driver)
+			dp.driverFilter[driver] = false
 			continue
 		}
-
 		n := 0
+		count := 0
 		for _, file := range files {
-			if !strings.HasPrefix(file.Name(), "0000:") {
+			if strings.HasPrefix(file.Name(), "0000:") {
+				count++
+			}
+			if count == 0 {
+				dp.driverFilter[driver] = false
 				continue
 			}
+			if !strings.HasPrefix(file.Name(), "0000:") {
+				continue
+			}	
 			vfdevID, err := dp.getDeviceID(file.Name())
 			if err != nil {
 				return nil, errors.Wrapf(err, "Cannot obtain deviceID for the device with PCI address: %s", file.Name())
@@ -268,8 +280,7 @@ func (dp *devicePlugin) scan() (deviceplugin.DeviceTree, error) {
 				return nil, err
 			}
 			deviceName := strings.TrimSuffix(namespace, ".intel.com")
-
-			devinfo := deviceplugin.DeviceInfo{
+       			devinfo := deviceplugin.DeviceInfo{
 				State:  pluginapi.Healthy,
 				Nodes:  devNodes,
 				Mounts: devMounts,
@@ -290,6 +301,7 @@ func main() {
 	kernelVfDrivers := flag.String("kernel-vf-drivers", "dh895xccvf,c6xxvf,c3xxxvf,d15xxvf", "Comma separated VF Device Driver of the QuickAssist Devices in the system. Devices supported: DH895xCC,C62x,C3xxx and D15xx")
 	maxNumDevices := flag.Int("max-num-devices", 32, "maximum number of QAT devices to be provided to the QuickAssist device plugin")
 	debugEnabled := flag.Bool("debug", false, "enable debug output")
+	var driverFilter = make(map[string]bool)
 	flag.Parse()
 	fmt.Println("QAT device plugin started")
 
@@ -304,13 +316,14 @@ func main() {
 
 	kernelDrivers := strings.Split(*kernelVfDrivers, ",")
 	for _, driver := range kernelDrivers {
+		driverFilter[driver] = true
 		if !isValidKerneDriver(driver) {
 			fmt.Println("Wrong kernel VF driver:", driver)
 			os.Exit(1)
 		}
 	}
-
-	plugin := newDevicePlugin(pciDriverDirectory, pciDeviceDirectory, *maxNumDevices, kernelDrivers, *dpdkDriver)
+	driverFilter[*dpdkDriver] = true
+	plugin := newDevicePlugin(pciDriverDirectory, pciDeviceDirectory, *maxNumDevices, kernelDrivers, *dpdkDriver, driverFilter)
 	manager := deviceplugin.NewManager(namespace, plugin)
 	manager.Run()
 }
