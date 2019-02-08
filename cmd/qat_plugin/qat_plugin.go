@@ -179,8 +179,15 @@ func (dp *devicePlugin) getDeviceID(pciAddr string) (string, error) {
 	if err != nil {
 		return "", errors.Wrapf(err, "Cannot obtain ID for the device %s", pciAddr)
 	}
-
-	return strings.TrimPrefix(string(bytes.TrimSpace(devID)), "0x"), nil
+	strID := strings.TrimPrefix(string(bytes.TrimSpace(devID)), "0x")
+	if strID == "37c9" {
+		subDevID, err := ioutil.ReadFile(path.Join(dp.pciDeviceDir, pciAddr, "subsystem_device"))
+		if err != nil {
+                	return "", errors.Wrapf(err, "Cannot obtain ID for the device %s", pciAddr)
+        	}
+		return strings.TrimPrefix(string(bytes.TrimSpace(subDevID)), "0x"), nil
+	}
+	return strID, nil
 }
 
 // bindDevice unbinds given device from kernel driver and binds to DPDK driver
@@ -224,7 +231,7 @@ func isValidDpdkDeviceDriver(dpdkDriver string) bool {
 }
 func isValidVfDeviceID(vfDevID string) bool {
 	switch vfDevID {
-	case "0442", "0443", "37c9", "19e3":
+	case "0442", "0443", "19e3", "0000", "35ce":
 		return true
 	}
 	return false
