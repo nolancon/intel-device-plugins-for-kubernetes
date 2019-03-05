@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package kerneldrv
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-ini/ini"
 	"github.com/pkg/errors"
 
 	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
@@ -32,7 +30,6 @@ import (
 
 	"github.com/intel/intel-device-plugins-for-kubernetes/pkg/debug"
 	dpapi "github.com/intel/intel-device-plugins-for-kubernetes/pkg/deviceplugin"
-	"github.com/intel/intel-device-plugins-for-kubernetes/pkg/ini"
 )
 
 const (
@@ -54,6 +51,8 @@ type section struct {
 	compressionEngines int
 	pinned             bool
 }
+
+type driverConfig map[string]section
 
 func newDeviceSpec(devPath string) pluginapi.DeviceSpec {
 	return pluginapi.DeviceSpec{
@@ -114,129 +113,33 @@ func getDevTree(devfs string, config map[string]section) (dpapi.DeviceTree, erro
 	return devTree, nil
 }
 
-type devicePlugin struct {
+// DevicePlugin represents QAT plugin exploiting kernel driver.
+type DevicePlugin struct {
 	execer    utilsexec.Interface
 	configDir string
 }
 
-func newDevicePlugin(configDir string, execer utilsexec.Interface) *devicePlugin {
-	return &devicePlugin{
+// NewDevicePlugin returns new instance of kernel based QAT plugin.
+func NewDevicePlugin() *DevicePlugin {
+	return newDevicePlugin("/etc", utilsexec.New())
+}
+
+func newDevicePlugin(configDir string, execer utilsexec.Interface) *DevicePlugin {
+	return &DevicePlugin{
 		execer:    execer,
 		configDir: configDir,
 	}
 }
 
-func (dp *devicePlugin) parseConfigs() (map[string]section, error) {
+func (dp *DevicePlugin) parseConfigs() (map[string]section, error) {
 	outputBytes, err := dp.execer.Command("adf_ctl", "status").CombinedOutput()
 	if err != nil {
 		return nil, errors.Wrapf(err, "Can't get driver status")
 	}
-	output := string(outputBytes[:])
 
-	devNum := 0
-	driverConfig := make(map[string]section)
-	for ln, line := range strings.Split(output, "\n") {
-		if !strings.HasPrefix(line, " qat_") {
-			continue
-		}
-
-		devstr := strings.SplitN(line, "-", 2)
-		if len(devstr) != 2 {
-			continue
-		}
-
-		devprops := strings.Split(devstr[1], ",")
-		devType := ""
-		for _, propstr := range devprops {
-			switch strings.TrimSpace(propstr) {
-			// Embeded in Chipset c62x.
-			case "type: c6xx":
-				devType = "c6xx"
-			// Cards with communication chipset 8925-8955.
-			case "type: dh895xcc":
-				devType = "dh895xcc"
-			}
-		}
-
-		if devType == "" {
-			continue
-		}
-
-		devID := strings.TrimPrefix(strings.TrimSpace(devstr[0]), "qat_")
-
-		f, err := os.Open(path.Join(dp.configDir, fmt.Sprintf("%s_%s.conf", devType, devID)))
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		defer f.Close()
-
-		// Parse the configuration.
-		config, err := ini.Parse(f)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		devNum++
-
-		debug.Print(ln, devID, line)
-
-		for sectionName, data := range config {
-			if sectionName == "GENERAL" || sectionName == "KERNEL" || sectionName == "KERNEL_QAT" || sectionName == "" {
-				continue
-			}
-			debug.Print(sectionName)
-
-			numProcesses, err := strconv.Atoi(data["NumProcesses"])
-			if err != nil {
-				return nil, errors.Wrapf(err, "Can't convert NumProcesses in %s", sectionName)
-			}
-			cryptoEngines, err := strconv.Atoi(data["NumberCyInstances"])
-			if err != nil {
-				return nil, errors.Wrapf(err, "Can't convert NumberCyInstances in %s", sectionName)
-			}
-			compressionEngines, err := strconv.Atoi(data["NumberDcInstances"])
-			if err != nil {
-				return nil, errors.Wrapf(err, "Can't convert NumberDcInstances in %s", sectionName)
-			}
-			pinned := false
-			if limitDevAccess, ok := data["LimitDevAccess"]; ok {
-				if limitDevAccess != "0" {
-					pinned = true
-				}
-			}
-
-			if old, ok := driverConfig[sectionName]; ok {
-				// first check the sections are consistent across endpoints
-				if old.pinned != pinned {
-					return nil, errors.Errorf("Value of LimitDevAccess must be consistent across all devices in %s", sectionName)
-				}
-				if !pinned && old.endpoints[0].processes != numProcesses {
-					return nil, errors.Errorf("For not pinned section \"%s\" NumProcesses must be equal for all devices", sectionName)
-				}
-				if old.cryptoEngines != cryptoEngines || old.compressionEngines != compressionEngines {
-					return nil, errors.Errorf("NumberCyInstances and NumberDcInstances must be consistent across all devices in %s", sectionName)
-				}
-
-				// then add a new endpoint to the section
-				old.endpoints = append(old.endpoints, endpoint{
-					id:        devID,
-					processes: numProcesses,
-				})
-				driverConfig[sectionName] = old
-			} else {
-				driverConfig[sectionName] = section{
-					endpoints: []endpoint{
-						{
-							id:        devID,
-							processes: numProcesses,
-						},
-					},
-					cryptoEngines:      cryptoEngines,
-					compressionEngines: compressionEngines,
-					pinned:             pinned,
-				}
-			}
-		}
-
+	devNum, driverConfig, err := dp.getDriverConfig(string(outputBytes[:]))
+	if err != nil {
+		return nil, err
 	}
 
 	// check if the number of sections with LimitDevAccess=1 is equal to the number of endpoints
@@ -249,7 +152,129 @@ func (dp *devicePlugin) parseConfigs() (map[string]section, error) {
 	return driverConfig, nil
 }
 
-func (dp *devicePlugin) Scan(notifier dpapi.Notifier) error {
+func (dp *DevicePlugin) getDriverConfig(output string) (int, map[string]section, error) {
+	devNum := 0
+	drvConfig := make(driverConfig)
+	for ln, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, " qat_") {
+			continue
+		}
+
+		devstr := strings.SplitN(line, "-", 2)
+		if len(devstr) != 2 {
+			continue
+		}
+
+		devprops := strings.Split(devstr[1], ",")
+		devType := getDevType(devprops)
+
+		if devType == "" {
+			continue
+		}
+
+		devID := strings.TrimPrefix(strings.TrimSpace(devstr[0]), "qat_")
+
+		// Parse the configuration.
+		config, err := ini.Load(path.Join(dp.configDir, fmt.Sprintf("%s_%s.conf", devType, devID)))
+		if err != nil {
+			return 0, nil, errors.Wrap(err, "failed to parse device config")
+		}
+		devNum++
+
+		debug.Print(ln, devID, line)
+
+		for _, section := range config.Sections() {
+			if section.Name() == "GENERAL" || section.Name() == "KERNEL" || section.Name() == "KERNEL_QAT" || section.Name() == ini.DEFAULT_SECTION {
+				continue
+			}
+			debug.Print(section.Name())
+			if err := drvConfig.update(devID, section); err != nil {
+				return 0, nil, err
+			}
+		}
+
+	}
+
+	return devNum, drvConfig, nil
+}
+
+func getDevType(devprops []string) string {
+	devType := ""
+	for _, propstr := range devprops {
+		switch strings.TrimSpace(propstr) {
+		// Embeded in Chipset c62x.
+		case "type: c6xx":
+			devType = "c6xx"
+		// Cards with communication chipset 8925-8955.
+		case "type: dh895xcc":
+			devType = "dh895xcc"
+		}
+	}
+	return devType
+}
+
+func (drvConfig driverConfig) update(devID string, iniSection *ini.Section) error {
+	numProcesses, err := iniSection.Key("NumProcesses").Int()
+	if err != nil {
+		return errors.Wrapf(err, "Can't parse NumProcesses in %s", iniSection.Name())
+	}
+	cryptoEngines, err := iniSection.Key("NumberCyInstances").Int()
+	if err != nil {
+		return errors.Wrapf(err, "Can't parse NumberCyInstances in %s", iniSection.Name())
+	}
+	compressionEngines, err := iniSection.Key("NumberDcInstances").Int()
+	if err != nil {
+		return errors.Wrapf(err, "Can't parse NumberDcInstances in %s", iniSection.Name())
+	}
+	pinned := false
+	if limitDevAccessKey, err := iniSection.GetKey("LimitDevAccess"); err == nil {
+		limitDevAccess, err := limitDevAccessKey.Bool()
+		if err != nil {
+			return errors.Wrapf(err, "Can't parse LimitDevAccess in %s", iniSection.Name())
+		}
+
+		if limitDevAccess {
+			pinned = true
+		}
+	}
+
+	if old, ok := drvConfig[iniSection.Name()]; ok {
+		// first check the sections are consistent across endpoints
+		if old.pinned != pinned {
+			return errors.Errorf("Value of LimitDevAccess must be consistent across all devices in %s", iniSection.Name())
+		}
+		if !pinned && old.endpoints[0].processes != numProcesses {
+			return errors.Errorf("For not pinned section \"%s\" NumProcesses must be equal for all devices", iniSection.Name())
+		}
+		if old.cryptoEngines != cryptoEngines || old.compressionEngines != compressionEngines {
+			return errors.Errorf("NumberCyInstances and NumberDcInstances must be consistent across all devices in %s", iniSection.Name())
+		}
+
+		// then add a new endpoint to the section
+		old.endpoints = append(old.endpoints, endpoint{
+			id:        devID,
+			processes: numProcesses,
+		})
+		drvConfig[iniSection.Name()] = old
+	} else {
+		drvConfig[iniSection.Name()] = section{
+			endpoints: []endpoint{
+				{
+					id:        devID,
+					processes: numProcesses,
+				},
+			},
+			cryptoEngines:      cryptoEngines,
+			compressionEngines: compressionEngines,
+			pinned:             pinned,
+		}
+	}
+
+	return nil
+}
+
+// Scan implements Scanner interface for kernel based QAT plugin.
+func (dp *DevicePlugin) Scan(notifier dpapi.Notifier) error {
 	for {
 		driverConfig, err := dp.parseConfigs()
 		if err != nil {
@@ -267,7 +292,8 @@ func (dp *devicePlugin) Scan(notifier dpapi.Notifier) error {
 	}
 }
 
-func (dp *devicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error {
+// PostAllocate implements PostAllocator interface for kernel based QAT plugin.
+func (dp *DevicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error {
 	for _, containerResponse := range response.GetContainerResponses() {
 		envsToDelete := []string{}
 		envsToAdd := make(map[string]string)
@@ -296,18 +322,4 @@ func (dp *devicePlugin) PostAllocate(response *pluginapi.AllocateResponse) error
 	}
 
 	return nil
-}
-
-func main() {
-	debugEnabled := flag.Bool("debug", false, "enable debug output")
-	flag.Parse()
-
-	if *debugEnabled {
-		debug.Activate()
-	}
-
-	plugin := newDevicePlugin("/etc", utilsexec.New())
-
-	manager := dpapi.NewManager(namespace, plugin)
-	manager.Run()
 }

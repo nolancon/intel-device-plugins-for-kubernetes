@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package kerneldrv
 
 import (
 	"fmt"
@@ -56,6 +56,16 @@ func TestParseConfigs(t *testing.T) {
 			testData:    "missing_pinned_section",
 			expectedErr: true,
 		},
+		{
+			name:        "Can't parse NumProcesses",
+			testData:    "cant_parse_num_processes",
+			expectedErr: true,
+		},
+		{
+			name:        "Inconsistent LimitDevAccess",
+			testData:    "inconsistent_limitdev",
+			expectedErr: true,
+		},
 	}
 	for _, tc := range tcases {
 		fcmd := fakeexec.FakeCmd{
@@ -72,7 +82,7 @@ func TestParseConfigs(t *testing.T) {
 				},
 			},
 		}
-		dp := &devicePlugin{
+		dp := &DevicePlugin{
 			execer:    &execer,
 			configDir: "./test_data/" + tc.testData,
 		}
@@ -198,7 +208,7 @@ func TestPostAllocate(t *testing.T) {
 		cresp.Envs = tc.envs
 		response.ContainerResponses = append(response.ContainerResponses, cresp)
 
-		dp := &devicePlugin{}
+		dp := &DevicePlugin{}
 
 		err := dp.PostAllocate(response)
 
