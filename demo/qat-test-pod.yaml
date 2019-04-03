@@ -1,0 +1,39 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: qat-test-priv-0
+spec:
+  containers:
+  - name: opensslapp
+    image: qat-test:devel
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+            - mountPath: /dev
+              name: dev-mount
+            - mountPath: /etc/dh895xcc_dev0.conf
+              name: dev0
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 300000; done;" ] 
+    resources:
+      requests:
+        cpu: "3"
+        memory: "128Mi"
+#        qat.intel.com/cy1_dc0: '1'
+        hugepages-2Mi: "1Gi"
+      limits:
+        cpu: "3"
+        memory: "128Mi"
+ #       qat.intel.com/cy1_dc0: '1'
+        hugepages-2Mi: "1Gi"
+    securityContext:
+      privileged: true
+      #capabilities:
+      #  add:
+      #    [SYS_ADMIN]
+  volumes:
+  - name: dev-mount
+    hostPath:
+        path: /dev
+  - name: dev0
+    hostPath:
+        path: /etc/dh895xcc_dev0.conf
